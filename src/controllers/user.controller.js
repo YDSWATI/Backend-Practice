@@ -1,7 +1,7 @@
 import { asyncHandler } from "../utils/asynhandler.js";
 import {ApiError} from "../utils/APIErrors.js"
 import { User} from "../models/user.model.js"
-import {uploadOnCloudinary} from "../utils/cloudinary.js"
+import {uploadOnCloudinary,deleteFromCloudinary} from "../utils/cloudinary.js"
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken"
 
@@ -57,7 +57,7 @@ const registerUser = asyncHandler(async (req,res) =>{
     const avatarLocalPath = req.files?.avatar[0]?.path;
 
     const coverImageLocalPath =
-        req.files?.coverImage[0]?.path;
+        req.files?.coverImage?.[0]?.path;
 
    if(!avatarLocalPath){
     throw new ApiError(400,"avatar required");
@@ -87,7 +87,7 @@ const registerUser = asyncHandler(async (req,res) =>{
    }
 
    return res.status(201).json(
-    new ApiResponse(200,createdUser,"User registered Successfully")
+    new ApiResponse(201,createdUser,"User registered Successfully")
    )
 
 
@@ -220,7 +220,7 @@ const changeCurrentPassword = asyncHandler(async(req,res)=>{
         throw new ApiError(400,"Invalid old Password")
     }
 
-    user.password = password
+    user.password = newPassword
     await user.save({validateBeforeSave:false});
     return res.status(200)
     .json(new ApiResponse(200,{},"Password changed Successfully"))
@@ -230,7 +230,7 @@ const changeCurrentPassword = asyncHandler(async(req,res)=>{
 const getCurrentUser = asyncHandler(async(req,res)=>{
     return res
     .status(200)
-    .json(200,req.user,"current user fetched successfully")
+    .json(new ApiResponse(200,req.user,"current user fetched successfully"))
 })
 
 const updateAccountDetails = asyncHandler(async(req,res)=>{
@@ -239,7 +239,7 @@ const updateAccountDetails = asyncHandler(async(req,res)=>{
         throw new ApiError(400,"All fields are required")
     }
 
-    const user = User.findByIdAndUpdate(
+    const user =await User.findByIdAndUpdate(
         req.user?._id,
         {
             $set:{
@@ -261,6 +261,11 @@ const updateUserAvatar = asyncHandler(async(req,res)=>{
     if(!avatarLocalPath){
         throw new ApiError(400,"Avatar is missing")
     }
+
+    //grab the old user
+    const oldUser = await User.findById(req.user?._id).select("avatar");
+    const oldAvatarUrl = oldUser?.avatar;
+
     const avatar = await uploadOnCloudinary(avatarLocalPath)
 
     if(!avatar.url){
@@ -276,6 +281,8 @@ const updateUserAvatar = asyncHandler(async(req,res)=>{
         
     },{new:true}).select("-password")
 
+    await deleteFromCloudinary(oldAvatarUrl);
+
     return res
     .status(200)
     .json(
@@ -287,6 +294,12 @@ const updateUserCoverImage = asyncHandler(async(req,res)=>{
     if(!coverImageLocalPath){
         throw new ApiError(400,"Cover image is missing")
     }
+
+    // 1. Grab the old URL before overwriting
+    const oldUser = await User.findById(req.user?._id).select("coverImage");
+    const oldCoverUrl = oldUser?.coverImage;
+
+
     const coverImage = await uploadOnCloudinary(coverImageLocalPath)
 
     if(!coverImage.url){
@@ -301,6 +314,9 @@ const updateUserCoverImage = asyncHandler(async(req,res)=>{
         },
         
     },{new:true}).select("-password")
+
+     // 4. Delete old image from Cloudinary (after DB is updated safely)
+     await deleteFromCloudinary(oldCoverUrl);
 
     return res
     .status(200)
